@@ -24,46 +24,39 @@ struct ScriptListView: View {
     @State private var justCopied = false
     @State private var searchText = ""
 
-    // delete confirmation
     @State private var showDeleteConfirmation = false
     @State private var pendingDelete: URL? = nil
 
     var onSelectScript: ((URL?) -> Void)? = nil
 
+    private var isPickerMode: Bool { onSelectScript != nil }
+
     private var filteredScripts: [URL] {
         guard !searchText.isEmpty else { return scripts }
         return scripts.filter { $0.lastPathComponent.localizedCaseInsensitiveContains(searchText) }
     }
+    
+    @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
+    @Environment(\.themeExpansionManager) private var themeExpansion
+    @Environment(\.colorScheme) private var colorScheme
+    private var backgroundStyle: BackgroundStyle { themeExpansion?.backgroundStyle(for: appThemeRaw) ?? AppTheme.system.backgroundStyle }
+    private var preferredScheme: ColorScheme? { themeExpansion?.preferredColorScheme(for: appThemeRaw) }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background gradient
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(UIColor.systemBackground),
-                        Color(UIColor.secondarySystemBackground)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                ThemedBackground(style: backgroundStyle)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 20) {
-                        // Search + actions card
                         headerCard
 
                         if filteredScripts.isEmpty {
                             emptyCard
                         } else {
                             ForEach(filteredScripts, id: \.self) { script in
-                                NavigationLink {
-                                    ScriptEditorView(scriptURL: script)
-                                } label: {
-                                    scriptCard(script)
-                                }
-                                .buttonStyle(.plain)
+                                scriptRow(script)
                             }
                         }
                     }
@@ -109,14 +102,16 @@ struct ScriptListView: View {
                     .animation(.easeInOut(duration: 0.25), value: justCopied)
                 }
             }
-            .navigationTitle("Scripts")
+            .navigationTitle(isPickerMode ? "Choose Script" : "Scripts")
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Button { showNewFileAlert = true } label: {
-                        Label("New", systemImage: "doc.badge.plus")
-                    }
-                    Button { showImporter = true } label: {
-                        Label("Import", systemImage: "tray.and.arrow.down")
+                    if !isPickerMode {
+                        Button { showNewFileAlert = true } label: {
+                            Label("New", systemImage: "doc.badge.plus")
+                        }
+                        Button { showImporter = true } label: {
+                            Label("Import", systemImage: "tray.and.arrow.down")
+                        }
                     }
                 }
             }
@@ -142,6 +137,7 @@ struct ScriptListView: View {
                 }
             }
         }
+        .preferredColorScheme(preferredScheme)
     }
 
     // MARK: - Cards
@@ -156,13 +152,21 @@ struct ScriptListView: View {
                         .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
                 )
 
-            // Equal-width rounded-rectangle buttons with centered content
             HStack(spacing: 12) {
-                WideGlassyButton(title: "New", systemImage: "doc.badge.plus") {
-                    showNewFileAlert = true
-                }
-                WideGlassyButton(title: "Import", systemImage: "tray.and.arrow.down") {
-                    showImporter = true
+                if isPickerMode {
+                    WideGlassyButton(title: "None", systemImage: "nosign") {
+                        onSelectScript?(nil)
+                    }
+                    WideGlassyButton(title: "Import", systemImage: "tray.and.arrow.down") {
+                        showImporter = true
+                    }
+                } else {
+                    WideGlassyButton(title: "New", systemImage: "doc.badge.plus") {
+                        showNewFileAlert = true
+                    }
+                    WideGlassyButton(title: "Import", systemImage: "tray.and.arrow.down") {
+                        showImporter = true
+                    }
                 }
             }
         }
@@ -170,7 +174,26 @@ struct ScriptListView: View {
         .background(glassyBackground)
     }
 
-    private func scriptCard(_ script: URL) -> some View {
+    @ViewBuilder
+    private func scriptRow(_ script: URL) -> some View {
+        if isPickerMode {
+            Button {
+                onSelectScript?(script)
+            } label: {
+                scriptCard(script, showDefaultStar: true, showDelete: false)
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink {
+                ScriptEditorView(scriptURL: script)
+            } label: {
+                scriptCard(script, showDefaultStar: true, showDelete: true)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func scriptCard(_ script: URL, showDefaultStar: Bool, showDelete: Bool) -> some View {
         let isDefault = defaultScriptName == script.lastPathComponent
 
         return HStack(spacing: 12) {
@@ -184,19 +207,21 @@ struct ScriptListView: View {
 
             Spacer()
 
-            if isDefault {
+            if showDefaultStar, isDefault {
                 Image(systemName: "star.fill")
                     .foregroundColor(.yellow)
             }
 
-            Button(role: .destructive) {
-                pendingDelete = script
-                showDeleteConfirmation = true
-            } label: {
-                Image(systemName: "trash")
-                    .foregroundColor(.red)
+            if showDelete {
+                Button(role: .destructive) {
+                    pendingDelete = script
+                    showDeleteConfirmation = true
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
             }
-            .buttonStyle(.borderless)
         }
         .padding(20)
         .background(glassyBackground)
@@ -207,18 +232,20 @@ struct ScriptListView: View {
             Button { copyPath(script) } label: {
                 Label("Copy Path", systemImage: "folder")
             }
-            Button { saveDefaultScript(script) } label: {
-                Label("Set Default", systemImage: "star")
+            if !isPickerMode {
+                Button { saveDefaultScript(script) } label: {
+                    Label("Set Default", systemImage: "star")
+                }
             }
-            // (Delete removed from context menu)
         }
     }
 
     private var emptyCard: some View {
         VStack(spacing: 6) {
-            Label("No scripts found", systemImage: "doc.text.magnifyingglass")
+            Label(isPickerMode ? "No scripts available" : "No scripts found",
+                  systemImage: "doc.text.magnifyingglass")
                 .font(.subheadline.weight(.semibold))
-            Text("Tap New or Import to get started.")
+            Text(isPickerMode ? "Import a file or choose None." : "Tap New or Import to get started.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
@@ -228,13 +255,43 @@ struct ScriptListView: View {
     }
 
     private var glassyBackground: some View {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 4)
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: overlayColors()),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .opacity(0.32)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 4)
+    }
+
+    private func overlayColors() -> [Color] {
+        let colors: [Color]
+        switch backgroundStyle {
+        case .staticGradient(let palette):
+            colors = palette
+        case .animatedGradient(let palette, _):
+            colors = palette
+        case .blobs(_, let background):
+            colors = background
+        case .particles(let particle, let background):
+            colors = background.isEmpty ? [particle, particle.opacity(0.4)] : background
+        case .customGradient(let palette):
+            colors = palette
+        case .adaptiveGradient(let light, let dark):
+            colors = colorScheme == .dark ? dark : light
+        }
+        if colors.count >= 2 { return colors }
+        if let first = colors.first { return [first, first.opacity(0.6)] }
+        return [Color.blue, Color.purple]
     }
 
     // MARK: - File Ops
@@ -243,7 +300,7 @@ struct ScriptListView: View {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("scripts")
         var isDir: ObjCBool = false
-        var exists = FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir)
+        let exists = FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir)
         do {
             if exists && !isDir.boolValue {
                 try FileManager.default.removeItem(at: dir)
@@ -311,7 +368,7 @@ struct ScriptListView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             defer { DispatchQueue.main.async { self.isBusy = false } }
             do {
-                let dest = scriptsDirectory().appendingPathComponent(fileURL.lastPathComponent)
+                let dest = self.scriptsDirectory().appendingPathComponent(fileURL.lastPathComponent)
                 if FileManager.default.fileExists(atPath: dest.path) {
                     try FileManager.default.removeItem(at: dest)
                 }
@@ -375,11 +432,11 @@ private struct WideGlassyButton: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity, alignment: .center) // center contents horizontally
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 14)
         }
         .frame(height: 44)
-        .frame(maxWidth: .infinity) // make both buttons equal width
+        .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.ultraThinMaterial)

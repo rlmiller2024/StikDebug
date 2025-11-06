@@ -9,18 +9,28 @@ import SwiftUI
 
 struct MainTabView: View {
     @AppStorage("customAccentColor") private var customAccentColorHex: String = ""
+    @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
     @State private var selection: Int = 0
 
     // Update checking
     @State private var showForceUpdate: Bool = false
     @State private var latestVersion: String? = nil
 
+    @Environment(\.themeExpansionManager) private var themeExpansion
+
     private var accentColor: Color {
-        customAccentColorHex.isEmpty ? .white : (Color(hex: customAccentColorHex) ?? .white)
+        themeExpansion?.resolvedAccentColor(from: customAccentColorHex) ?? .blue
+    }
+    
+    private var preferredScheme: ColorScheme? {
+        themeExpansion?.preferredColorScheme(for: appThemeRaw)
     }
 
     var body: some View {
         ZStack {
+            // Allow global themed background to show
+            Color.clear.ignoresSafeArea()
+            
             // Main tabs
             TabView(selection: $selection) {
                 HomeView()
@@ -30,7 +40,7 @@ struct MainTabView: View {
                 ScriptListView()
                     .tabItem { Label("Scripts", systemImage: "scroll") }
                     .tag(1)
-
+                
                 DeviceInfoView()
                     .tabItem { Label("Device Info", systemImage: "info.circle.fill") }
                     .tag(3)
@@ -39,22 +49,16 @@ struct MainTabView: View {
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                     .tag(4)
             }
+            .id((themeExpansion?.hasThemeExpansion == true) ? customAccentColorHex : "default-accent")
+            .tint(accentColor)
+            .preferredColorScheme(preferredScheme)
             .onAppear {
                 checkForUpdate()
             }
 
-            // Force update overlay
             if showForceUpdate {
                 ZStack {
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color(UIColor.systemBackground),
-                            Color(UIColor.secondarySystemBackground)
-                        ]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .ignoresSafeArea()
+                    Color.black.opacity(0.001).ignoresSafeArea()
 
                     VStack(spacing: 20) {
                         Text("Update Required")
@@ -146,5 +150,6 @@ struct MainTabView: View {
 struct MainTabView_Previews: PreviewProvider {
     static var previews: some View {
         MainTabView()
+            .themeExpansionManager(ThemeExpansionManager(previewUnlocked: true))
     }
 }
